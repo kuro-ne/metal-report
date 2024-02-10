@@ -1,40 +1,97 @@
+import os
+import time
+
 import altair as alt
 import numpy as np
 import pandas as pd
+import pymongo
+import requests
 import streamlit as st
+from dotenv import load_dotenv
 
-"""
-# Welcome to Streamlit!
+load_dotenv()
 
-Edit `/streamlit_app.py` to customize this app to your heart's desire :heart:.
-If you have any questions, checkout our [documentation](https://docs.streamlit.io) and [community
-forums](https://discuss.streamlit.io).
+# Set the page title
+st.title("REPORT")
 
-In the meantime, below is an example of what you can do with just a few lines of code:
-"""
+if st.button("Reset"):
+    st.session_state.value = "Reset"
+    st.rerun()
 
-num_points = st.slider("Number of points in spiral", 1, 10000, 1100)
-num_turns = st.slider("Number of turns in spiral", 1, 300, 31)
 
-indices = np.linspace(0, 1, num_points)
-theta = 2 * np.pi * num_turns * indices
-radius = indices
+def get_data():
+    mongo_uri = os.getenv("MONGO_URI")
+    client = pymongo.MongoClient(mongo_uri)
+    db = client["account"]
+    collection = db["referral"]
+    data = collection.find()
 
-x = radius * np.cos(theta)
-y = radius * np.sin(theta)
+    print(data)
 
-df = pd.DataFrame({
-    "x": x,
-    "y": y,
-    "idx": indices,
-    "rand": np.random.randn(num_points),
-})
+    return data
 
-st.altair_chart(alt.Chart(df, height=700, width=700)
-    .mark_point(filled=True)
-    .encode(
-        x=alt.X("x", axis=None),
-        y=alt.Y("y", axis=None),
-        color=alt.Color("idx", legend=None, scale=alt.Scale()),
-        size=alt.Size("rand", legend=None, scale=alt.Scale(range=[1, 150])),
-    ))
+
+def get_leaderboard(id: str):
+    if not id:
+        return None
+    url = "https://w3gg.io/api/v1/leaderboards"
+
+    querystring = {"offset": "0", "limit": "3", "filter": "user_id:eq:{}".format(id)}
+
+    payload = ""
+    headers = {"User-Agent": "insomnia/2023.5.8"}
+
+    response = requests.request("GET", url, data=payload, headers=headers, params=querystring)
+    if response.status_code == 200:
+        j = response.json()
+        r = j.get("results", [])
+        if len(r) > 0:
+            return r[0]
+        else:
+            return None
+    else:
+        return None
+
+
+data = get_data()
+
+filtered_data = []
+for d in data:
+    e = {
+        "name": d.get("name", None),
+        "email": d.get("email", None),
+        # "password": d.get("password", None),
+        "active": d.get("active", None),
+        "referral_code": d.get("referral_code", None),
+        "id": d.get("id", None),
+        "exp": None,
+        "wxp": None,
+    }
+    # check leaderboards
+    l = get_leaderboard(e.get("id"))
+    if l:
+        exp = l.get("exp", None)
+        wxp = l.get("wxp", None)
+
+        if exp:
+            e["exp"] = str(int(exp))
+        if wxp:
+            e["wxp"] = str(int(wxp))
+
+    filtered_data.append(e)
+
+df = pd.DataFrame(filtered_data)
+st.table(df)
+
+
+progress_text = "count down.."
+my_bar = st.progress(0, text=progress_text)
+
+for percent_complete in range(30):
+    time.sleep(1)
+    my_bar.progress(percent_complete + 1, text=progress_text)
+
+st.write("refetching data")
+time.sleep(1)
+my_bar.empty()
+st.rerun()
